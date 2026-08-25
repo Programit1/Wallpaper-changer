@@ -1,18 +1,17 @@
 """
-Main Dashboard UI with Sidebar Navigation, Online Grid Browser, Favorites, and Local Library.
+Main Pinterest-style Wallpaper Discovery Window.
+Integrates top search bar, sidebar navigation, masonry gallery feed, favorites, and settings.
 """
 
 import os
-import subprocess
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QStackedWidget, QStatusBar, QFrame
+    QLineEdit, QPushButton, QStackedWidget, QStatusBar, QFrame
 )
 from PyQt6.QtGui import QPixmap
 from ui.sidebar import SidebarWidget
-from ui.online_grid_view import OnlineGridView
-from ui.library_view import LibraryView
+from ui.masonry_gallery import MasonryGallery
 from ui.settings_view import SettingsDialog
 
 
@@ -24,10 +23,12 @@ class MainWindow(QMainWindow):
         self.wm = wallpaper_manager
         self.config = config_manager
         self.tray_icon_ref = None
+        self.current_page = 1
+        self.active_query = ""
 
         self.setWindowTitle("Wallhaven Wallpaper Changer")
-        self.setMinimumSize(960, 600)
-        self.resize(1040, 640)
+        self.setMinimumSize(980, 620)
+        self.resize(1120, 680)
 
         self._init_ui()
         self.update_current_display(self.wm.current_wallpaper)
@@ -36,147 +37,176 @@ class MainWindow(QMainWindow):
         self.wm.wallpaper_changed.connect(self.update_current_display)
         self.wm.status_message.connect(self.statusBar().showMessage)
 
-        # Trigger initial search on startup
-        initial_query = self.config.get_active_query()
-        self.online_grid.search_query(initial_query)
+        # Trigger initial search feed
+        initial_genre = self.config.get("selected_genre", "Cyberpunk")
+        self._fetch_online_feed(initial_genre, page=1, append=False)
 
     def _init_ui(self):
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
 
         main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # Left Sidebar Navigation Panel
+        # Left Sidebar Navigation
         self.sidebar = SidebarWidget(self.config, self)
-        self.sidebar.genre_selected.connect(self._on_genre_selected)
-        self.sidebar.search_submitted.connect(self._on_search_submitted)
-        self.sidebar.nav_changed.connect(self._on_nav_changed)
+        self.sidebar.nav_selected.connect(self._on_sidebar_nav)
         main_layout.addWidget(self.sidebar)
 
-        # Divider Line
-        line = QFrame(self)
-        line.setFrameShape(QFrame.Shape.VLine)
-        line.setStyleSheet("color: #334155;")
-        main_layout.addWidget(line)
+        # Right Main Content Section
+        right_widget = QWidget(self)
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(16, 12, 16, 12)
+        right_layout.setSpacing(12)
 
-        # Right Main Content Container
-        right_container = QVBoxLayout()
-        right_container.setContentsMargins(6, 6, 6, 6)
-        right_container.setSpacing(10)
+        # Top Bar: Search Bar & Current Wallpaper Status
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(12)
 
-        # Active Wallpaper Header Banner
-        active_card = QFrame(self)
-        active_card.setObjectName("CardPanel")
-        active_layout = QHBoxLayout(active_card)
-        active_layout.setContentsMargins(10, 8, 10, 8)
-        active_layout.setSpacing(12)
+        # Search Bar
+        self.search_bar = QLineEdit(self)
+        self.search_bar.setObjectName("SearchBar")
+        self.search_bar.setPlaceholderText("🔍 Search wallpapers... (e.g. dark cyberpunk city)")
+        self.search_bar.setText(self.config.get("custom_search", ""))
+        self.search_bar.returnPressed.connect(self._on_search_submitted)
+        top_bar.addWidget(self.search_bar, 1)
 
-        self.active_thumb_lbl = QLabel(self)
-        self.active_thumb_lbl.setFixedSize(90, 54)
-        self.active_thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.active_thumb_lbl.setStyleSheet("""
-            background-color: #020617;
-            border: 1px solid #334155;
-            border-radius: 4px;
+        # Compact Desktop Status Pill
+        self.status_pill = QFrame(self)
+        self.status_pill.setStyleSheet("""
+            QFrame {
+                background-color: #111827;
+                border: 1px solid #1f2937;
+                border-radius: 18px;
+                padding: 2px 10px;
+            }
         """)
-        active_layout.addWidget(self.active_thumb_lbl)
+        pill_layout = QHBoxLayout(self.status_pill)
+        pill_layout.setContentsMargins(8, 4, 8, 4)
+        pill_layout.setSpacing(8)
 
-        info_box = QVBoxLayout()
-        info_box.setSpacing(2)
+        self.pill_thumb = QLabel(self.status_pill)
+        self.pill_thumb.setFixedSize(28, 20)
+        self.pill_thumb.setStyleSheet("border-radius: 3px; background-color: #020617;")
+        pill_layout.addWidget(self.pill_thumb)
 
-        self.lbl_title = QLabel("Current: None Loaded", self)
-        self.lbl_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #38bdf8;")
-        info_box.addWidget(self.lbl_title)
+        self.pill_text = QLabel("Desktop: None", self.status_pill)
+        self.pill_text.setStyleSheet("font-size: 12px; color: #94a3b8; font-weight: 500;")
+        pill_layout.addWidget(self.pill_text)
 
-        self.lbl_details = QLabel("Resolution: --- | Category: ---", self)
-        self.lbl_details.setStyleSheet("font-size: 12px; color: #94a3b8;")
-        info_box.addWidget(self.lbl_details)
+        top_bar.addWidget(self.status_pill)
 
-        active_layout.addLayout(info_box, 1)
+        right_layout.addLayout(top_bar)
 
-        # Quick Control Buttons
-        self.btn_favorite = QPushButton("★ Favorite", self)
-        self.btn_favorite.clicked.connect(self._toggle_favorite)
-        active_layout.addWidget(self.btn_favorite)
-
-        self.btn_next = QPushButton("Next Wallpaper", self)
-        self.btn_next.setObjectName("PrimaryButton")
-        self.btn_next.clicked.connect(self.wm.fetch_next_wallpaper)
-        active_layout.addWidget(self.btn_next)
-
-        right_container.addWidget(active_card)
-
-        # Stacked Pages Widget
+        # Stacked Pages
         self.stack = QStackedWidget(self)
 
-        # Page 0: Online Grid View
-        self.online_grid = OnlineGridView(self.wm, self.config, self)
-        self.stack.addWidget(self.online_grid)
+        # Page 0: Online Masonry Gallery
+        self.discover_gallery = MasonryGallery(self.wm, self.config, self)
+        self.discover_gallery.load_more_requested.connect(self._on_load_more_requested)
+        self.stack.addWidget(self.discover_gallery)
 
-        # Page 1: Favorites View
-        self.fav_library = LibraryView(self.wm, self)
-        self.fav_library.filter_combo.setCurrentText("Favorites")
-        self.stack.addWidget(self.fav_library)
+        # Page 1: Favorites Masonry Gallery
+        self.fav_gallery = MasonryGallery(self.wm, self.config, self)
+        self.stack.addWidget(self.fav_gallery)
 
-        # Page 2: Local Library View
-        self.local_library = LibraryView(self.wm, self)
-        self.stack.addWidget(self.local_library)
+        # Page 2: Downloads Masonry Gallery
+        self.downloads_gallery = MasonryGallery(self.wm, self.config, self)
+        self.stack.addWidget(self.downloads_gallery)
 
-        right_container.addWidget(self.stack, 1)
+        right_layout.addWidget(self.stack, 1)
 
-        main_layout.addLayout(right_container, 1)
+        main_layout.addWidget(right_widget, 1)
 
         # Status Bar
         self.setStatusBar(QStatusBar(self))
         self.statusBar().showMessage("Ready")
 
-    def _on_genre_selected(self, genre: str):
-        self.stack.setCurrentIndex(0)
-        self.online_grid.search_query(genre)
+    def _fetch_online_feed(self, query: str = "", page: int = 1, append: bool = False):
+        """Fetches wallpapers from Wallhaven API and populates discovery masonry feed."""
+        self.active_query = query
+        self.current_page = page
+        self.statusBar().showMessage(f"Fetching wallpapers for '{query or 'Discover'}' (Page {page})...")
 
-    def _on_search_submitted(self, query: str):
-        self.stack.setCurrentIndex(0)
-        self.online_grid.search_query(query)
+        cats = self.config.get_categories_string()
+        purity = self.config.get_purity_string()
+        sorting = self.config.get("sorting", "random")
+        res_param = self.config.get_resolution_param()
 
-    def _on_nav_changed(self, page_index: int):
-        if page_index == 3:  # Settings
+        res_data = self.wm.api_client.search_wallpapers(
+            query=query,
+            categories=cats,
+            purity=purity,
+            sorting=sorting,
+            resolutions=res_param,
+            page=page
+        )
+
+        meta_info = res_data.get("meta", {})
+        if meta_info.get("error"):
+            self.statusBar().showMessage(f"API Error: {meta_info['error']}")
+            return
+
+        items = res_data.get("data", [])
+        if not items and not append:
+            self.statusBar().showMessage("No wallpapers found for search query.")
+            self.discover_gallery.set_items([], append=False, show_load_more=False)
+            return
+
+        self.statusBar().showMessage(f"Loaded {len(items)} wallpapers.")
+        self.discover_gallery.set_items(items, append=append, show_load_more=True)
+
+    def _on_search_submitted(self):
+        query = self.search_bar.text().strip()
+        self.config.set("custom_search", query)
+        self.stack.setCurrentIndex(0)
+        self._fetch_online_feed(query, page=1, append=False)
+
+    def _on_sidebar_nav(self, sec_type: str, val: str):
+        if sec_type == "discover":
+            self.search_bar.clear()
+            self.config.set("custom_search", "")
+            self.stack.setCurrentIndex(0)
+            self._fetch_online_feed("", page=1, append=False)
+        elif sec_type == "category":
+            self.search_bar.clear()
+            self.config.set("custom_search", "")
+            self.stack.setCurrentIndex(0)
+            self._fetch_online_feed(val, page=1, append=False)
+        elif sec_type == "library":
+            if val == "favorites":
+                self.stack.setCurrentIndex(1)
+                self.load_favorites_feed()
+            elif val == "downloads":
+                self.stack.setCurrentIndex(2)
+                self.load_downloads_feed()
+        elif sec_type == "settings":
             self.open_settings()
-        else:
-            self.stack.setCurrentIndex(page_index)
-            if page_index == 1:
-                self.fav_library.filter_combo.setCurrentText("Favorites")
-                self.fav_library.reload_library()
-            elif page_index == 2:
-                self.local_library.filter_combo.setCurrentText("All")
-                self.local_library.reload_library()
+
+    def _on_load_more_requested(self):
+        self.current_page += 1
+        self._fetch_online_feed(self.active_query, page=self.current_page, append=True)
+
+    def load_favorites_feed(self):
+        items = list(self.wm.cache_manager.index.values())
+        favs = [item for item in items if item.get("favorite", False)]
+        self.fav_gallery.set_items(favs, append=False, show_load_more=False)
+
+    def load_downloads_feed(self):
+        items = list(self.wm.cache_manager.index.values())
+        items.sort(key=lambda x: x.get("download_date", 0), reverse=True)
+        self.downloads_gallery.set_items(items, append=False, show_load_more=False)
 
     def update_current_display(self, meta: dict | None):
         if not meta:
-            self.lbl_title.setText("Current: None Loaded")
-            self.lbl_details.setText("Resolution: ---")
-            self.active_thumb_lbl.setText("No Image")
+            self.pill_text.setText("Desktop: None")
             return
 
         wp_id = meta.get("id", "Unknown")
         res = meta.get("resolution", "Unknown")
-        is_fav = meta.get("favorite", False)
-        genre = self.config.get("selected_genre", "Cyberpunk")
+        self.pill_text.setText(f"Desktop: #{wp_id} [{res}]")
 
-        fav_symbol = "★ " if is_fav else ""
-        self.lbl_title.setText(f"{fav_symbol}Current: Wallpaper #{wp_id}")
-        self.lbl_details.setText(f"Resolution: {res} | Category: {genre}")
-
-        if is_fav:
-            self.btn_favorite.setText("★ Favorited")
-            self.btn_favorite.setObjectName("FavoriteButton")
-        else:
-            self.btn_favorite.setText("★ Favorite")
-            self.btn_favorite.setObjectName("")
-        self.btn_favorite.setStyle(self.btn_favorite.style())
-
-        # Update Thumbnail
         thumb_path = meta.get("thumb_path")
         filepath = meta.get("filepath")
         target_img = thumb_path if (thumb_path and os.path.exists(thumb_path)) else filepath
@@ -185,28 +215,17 @@ class MainWindow(QMainWindow):
             pixmap = QPixmap(target_img)
             if not pixmap.isNull():
                 scaled = pixmap.scaled(
-                    self.active_thumb_lbl.size(),
+                    self.pill_thumb.size(),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 )
-                self.active_thumb_lbl.setPixmap(scaled)
-
-    def _toggle_favorite(self):
-        fav = self.wm.toggle_current_favorite()
-        if fav:
-            self.btn_favorite.setText("★ Favorited")
-            self.btn_favorite.setObjectName("FavoriteButton")
-        else:
-            self.btn_favorite.setText("★ Favorite")
-            self.btn_favorite.setObjectName("")
-        self.btn_favorite.setStyle(self.btn_favorite.style())
+                self.pill_thumb.setPixmap(scaled)
 
     def open_settings(self):
         dialog = SettingsDialog(self.config, self.wm, self)
         if dialog.exec():
-            self.local_library.reload_library()
-            self.fav_library.reload_library()
-            self.online_grid.refresh_search()
+            initial_query = self.config.get_active_query()
+            self._fetch_online_feed(initial_query, page=1, append=False)
 
     def closeEvent(self, event):
         """Intersects window close button: hides window to system tray instead of exiting app."""

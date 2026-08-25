@@ -1,6 +1,6 @@
 """
-Settings View Dialog.
-Tabbed interface for General, Wallhaven API, Storage, and Network options.
+Organized Tabbed Settings Dialog.
+Sections: General, Wallpaper Automation, Network, Storage, and About.
 """
 
 from PyQt6.QtWidgets import (
@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QLabel, QComboBox, QLineEdit, QPushButton, QGroupBox,
     QMessageBox
 )
-from config import RESOLUTION_PRESETS
+from config import RESOLUTION_PRESETS, GENRES
 
 
 class SettingsDialog(QDialog):
@@ -19,7 +19,7 @@ class SettingsDialog(QDialog):
         self.config = config_manager
         self.wm = wallpaper_manager
         self.setWindowTitle("Settings - Wallhaven Wallpaper Changer")
-        self.setMinimumSize(540, 420)
+        self.setMinimumSize(560, 440)
 
         self._init_ui()
         self.load_values()
@@ -30,25 +30,33 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget(self)
         main_layout.addWidget(self.tabs)
 
-        # Tab 1: General Options
+        # Tab 1: General
         gen_tab = QWidget()
         gen_layout = QVBoxLayout(gen_tab)
         
         self.chk_start_windows = QCheckBox("Start with Windows login", self)
         gen_layout.addWidget(self.chk_start_windows)
 
-        self.chk_start_minimized = QCheckBox("Start minimized to System Tray", self)
+        self.chk_start_minimized = QCheckBox("Minimize to system tray on close", self)
         gen_layout.addWidget(self.chk_start_minimized)
 
         gen_layout.addStretch()
         self.tabs.addTab(gen_tab, "General")
 
-        # Tab 2: Wallhaven API & Resolution Settings
+        # Tab 2: Wallpaper Automation
         wp_tab = QWidget()
         wp_layout = QVBoxLayout(wp_tab)
 
+        cat_box = QHBoxLayout()
+        cat_box.addWidget(QLabel("Rotation Category:", self))
+        self.combo_genre = QComboBox(self)
+        self.combo_genre.addItems(GENRES)
+        cat_box.addWidget(self.combo_genre)
+        cat_box.addStretch()
+        wp_layout.addLayout(cat_box)
+
         int_box = QHBoxLayout()
-        int_box.addWidget(QLabel("Auto Rotation Interval:", self))
+        int_box.addWidget(QLabel("Change Interval:", self))
         self.combo_interval = QComboBox(self)
         self.combo_interval.addItems(["Manual", "30 Mins", "1 Hour", "3 Hours", "6 Hours", "Daily"])
         int_box.addWidget(self.combo_interval)
@@ -63,15 +71,13 @@ class SettingsDialog(QDialog):
         res_box.addStretch()
         wp_layout.addLayout(res_box)
 
-        cat_group = QGroupBox("Categories", self)
-        cat_l = QHBoxLayout(cat_group)
-        self.chk_cat_general = QCheckBox("General", self)
-        self.chk_cat_anime = QCheckBox("Anime", self)
-        self.chk_cat_people = QCheckBox("People", self)
-        cat_l.addWidget(self.chk_cat_general)
-        cat_l.addWidget(self.chk_cat_anime)
-        cat_l.addWidget(self.chk_cat_people)
-        wp_layout.addWidget(cat_group)
+        sort_box = QHBoxLayout()
+        sort_box.addWidget(QLabel("Sorting Strategy:", self))
+        self.combo_sorting = QComboBox(self)
+        self.combo_sorting.addItems(["random", "relevance", "date_added", "views", "favorites", "toplist"])
+        sort_box.addWidget(self.combo_sorting)
+        sort_box.addStretch()
+        wp_layout.addLayout(sort_box)
 
         pur_group = QGroupBox("Purity Filter", self)
         pur_l = QHBoxLayout(pur_group)
@@ -83,16 +89,8 @@ class SettingsDialog(QDialog):
         pur_l.addWidget(self.chk_pur_nsfw)
         wp_layout.addWidget(pur_group)
 
-        sort_box = QHBoxLayout()
-        sort_box.addWidget(QLabel("Sorting Strategy:", self))
-        self.combo_sorting = QComboBox(self)
-        self.combo_sorting.addItems(["random", "relevance", "date_added", "views", "favorites", "toplist"])
-        sort_box.addWidget(self.combo_sorting)
-        sort_box.addStretch()
-        wp_layout.addLayout(sort_box)
-
         wp_layout.addStretch()
-        self.tabs.addTab(wp_tab, "Wallhaven")
+        self.tabs.addTab(wp_tab, "Wallpaper Automation")
 
         # Tab 3: Storage & Cache
         store_tab = QWidget()
@@ -120,7 +118,7 @@ class SettingsDialog(QDialog):
         store_layout.addStretch()
         self.tabs.addTab(store_tab, "Storage")
 
-        # Tab 4: Network Options
+        # Tab 4: Network
         net_tab = QWidget()
         net_layout = QVBoxLayout(net_tab)
 
@@ -137,6 +135,26 @@ class SettingsDialog(QDialog):
 
         net_layout.addStretch()
         self.tabs.addTab(net_tab, "Network")
+
+        # Tab 5: About
+        about_tab = QWidget()
+        about_layout = QVBoxLayout(about_tab)
+        about_layout.setSpacing(8)
+
+        lbl_app_name = QLabel("Wallhaven Desktop Wallpaper Changer", about_tab)
+        lbl_app_name.setStyleSheet("font-size: 16px; font-weight: bold; color: #38bdf8;")
+        about_layout.addWidget(lbl_app_name)
+
+        lbl_ver = QLabel("Version: 1.0.0 (Pinterest-Style UX Edition)", about_tab)
+        lbl_ver.setStyleSheet("color: #94a3b8;")
+        about_layout.addWidget(lbl_ver)
+
+        lbl_repo = QLabel("GitHub Repository: https://github.com/Programit1/Wallpaper-changer", about_tab)
+        lbl_repo.setStyleSheet("color: #94a3b8;")
+        about_layout.addWidget(lbl_repo)
+
+        about_layout.addStretch()
+        self.tabs.addTab(about_tab, "About")
 
         # Bottom Action Buttons
         bottom_btns = QHBoxLayout()
@@ -157,13 +175,9 @@ class SettingsDialog(QDialog):
         self.chk_start_windows.setChecked(self.config.get("start_with_windows", False))
         self.chk_start_minimized.setChecked(self.config.get("start_minimized", False))
 
+        self.combo_genre.setCurrentText(self.config.get("selected_genre", "Cyberpunk"))
         self.combo_interval.setCurrentText(self.config.get("rotation_interval", "1 Hour"))
         self.combo_resolution.setCurrentText(self.config.get("resolution_preset", "Any"))
-
-        cats = self.config.get("categories", {})
-        self.chk_cat_general.setChecked(cats.get("general", True))
-        self.chk_cat_anime.setChecked(cats.get("anime", True))
-        self.chk_cat_people.setChecked(cats.get("people", False))
 
         pur = self.config.get("purity", {})
         self.chk_pur_sfw.setChecked(pur.get("sfw", True))
@@ -183,6 +197,8 @@ class SettingsDialog(QDialog):
         self.config.set("start_with_windows", self.chk_start_windows.isChecked())
         self.config.set("start_minimized", self.chk_start_minimized.isChecked())
 
+        self.config.set("selected_genre", self.combo_genre.currentText())
+
         old_interval = self.config.get("rotation_interval")
         new_interval = self.combo_interval.currentText()
         self.config.set("rotation_interval", new_interval)
@@ -190,12 +206,6 @@ class SettingsDialog(QDialog):
             self.wm.scheduler.update_interval()
 
         self.config.set("resolution_preset", self.combo_resolution.currentText())
-
-        self.config.set("categories", {
-            "general": self.chk_cat_general.isChecked(),
-            "anime": self.chk_cat_anime.isChecked(),
-            "people": self.chk_cat_people.isChecked()
-        })
 
         self.config.set("purity", {
             "sfw": self.chk_pur_sfw.isChecked(),

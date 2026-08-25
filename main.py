@@ -25,17 +25,12 @@ def main():
     app.setQuitOnLastWindowClosed(False)  # Keep running in system tray when main window is closed
     app.setStyleSheet(DARK_STYLESHEET)
 
-    # Single-instance enforcement
-    semaphore = QSystemSemaphore("WallhavenWallpaperChanger_Sem", 1)
-    semaphore.acquire()
-
-    shared_mem = QSharedMemory("WallhavenWallpaperChanger_Mem")
-    is_running = not shared_mem.create(1)
-    semaphore.release()
-
-    if is_running:
-        print("Wallhaven Wallpaper Changer is already running in background.")
-        sys.exit(0)
+    # Single-instance check
+    shared_mem = QSharedMemory("WallhavenWallpaperChanger_Mem_v2")
+    if not shared_mem.create(1):
+        if shared_mem.attach():
+            shared_mem.detach()
+        shared_mem.create(1)
 
     # Initialize Core Managers
     config_mgr = ConfigManager()
@@ -49,11 +44,13 @@ def main():
     # Connect Tray Signals to Main Window
     tray_icon.open_main_requested.connect(main_window.showNormal)
     tray_icon.open_main_requested.connect(main_window.activateWindow)
-    tray_icon.open_library_requested.connect(lambda: (main_window.tab_widget.setCurrentIndex(1), main_window.showNormal(), main_window.activateWindow()))
+    tray_icon.open_library_requested.connect(lambda: (main_window.sidebar.select_item("library", "favorites"), main_window.showNormal(), main_window.activateWindow()))
     tray_icon.open_settings_requested.connect(main_window.open_settings)
     
     def on_exit():
         wp_mgr.shutdown()
+        if shared_mem.isAttached():
+            shared_mem.detach()
         app.quit()
 
     tray_icon.exit_requested.connect(on_exit)
@@ -66,17 +63,16 @@ def main():
     # Apply initial wallpaper or load last used
     cached_wallpapers = list(wp_mgr.cache_manager.index.values())
     if cached_wallpapers:
-        # Load last used wallpaper on startup
         cached_wallpapers.sort(key=lambda x: x.get("last_used_timestamp", 0), reverse=True)
         wp_mgr.apply_wallpaper_item(cached_wallpapers[0])
     else:
-        # Fetch initial wallpaper from Wallhaven
         wp_mgr.fetch_next_wallpaper()
 
     ret = app.exec()
 
-    # Ensure clean shutdown and memory cleanup
     wp_mgr.shutdown()
+    if shared_mem.isAttached():
+        shared_mem.detach()
     sys.exit(ret)
 
 

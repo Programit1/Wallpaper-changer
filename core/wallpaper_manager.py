@@ -40,19 +40,19 @@ class WallpaperManager(QObject):
         self.scheduler.rotation_triggered.connect(self.fetch_next_wallpaper)
 
     def fetch_next_wallpaper(self):
-        """Fetches and sets next wallpaper (online from Wallhaven or offline from cache)."""
+        """Fetches and sets next wallpaper using selected genre or custom search term."""
         self.status_message.emit("Fetching wallpaper...")
 
         if self.config.get("offline_mode", False):
             self._apply_random_offline_wallpaper()
             return
 
-        # Fetch from Wallhaven API
-        query = self.config.get("search_query", "")
+        # Fetch from Wallhaven API using active search query & resolution preset
+        query = self.config.get_active_query()
         cats = self.config.get_categories_string()
         purity = self.config.get_purity_string()
         sorting = self.config.get("sorting", "random")
-        res = self.config.get("resolution_preference", "")
+        res_param = self.config.get_resolution_param()
         ratios = ",".join(self.config.get("aspect_ratios", ["16x9"]))
 
         res_data = self.api_client.search_wallpapers(
@@ -60,7 +60,7 @@ class WallpaperManager(QObject):
             categories=cats,
             purity=purity,
             sorting=sorting,
-            resolutions=res,
+            resolutions=res_param,
             ratios=ratios
         )
 

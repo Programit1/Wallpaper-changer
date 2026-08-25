@@ -1,6 +1,6 @@
 """
 Settings View Dialog.
-Tabbed interface for General, Wallhaven, Storage, and Network settings.
+Tabbed interface for General, Wallhaven API, Storage, and Network options.
 """
 
 from PyQt6.QtWidgets import (
@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QLabel, QComboBox, QLineEdit, QPushButton, QGroupBox,
     QMessageBox
 )
+from config import RESOLUTION_PRESETS
 
 
 class SettingsDialog(QDialog):
@@ -18,7 +19,7 @@ class SettingsDialog(QDialog):
         self.config = config_manager
         self.wm = wallpaper_manager
         self.setWindowTitle("Settings - Wallhaven Wallpaper Changer")
-        self.setMinimumSize(520, 380)
+        self.setMinimumSize(540, 420)
 
         self._init_ui()
         self.load_values()
@@ -29,7 +30,7 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget(self)
         main_layout.addWidget(self.tabs)
 
-        # Tab 1: General
+        # Tab 1: General Options
         gen_tab = QWidget()
         gen_layout = QVBoxLayout(gen_tab)
         
@@ -42,24 +43,25 @@ class SettingsDialog(QDialog):
         gen_layout.addStretch()
         self.tabs.addTab(gen_tab, "General")
 
-        # Tab 2: Wallpaper / Wallhaven
+        # Tab 2: Wallhaven API & Resolution Settings
         wp_tab = QWidget()
         wp_layout = QVBoxLayout(wp_tab)
 
         int_box = QHBoxLayout()
         int_box.addWidget(QLabel("Auto Rotation Interval:", self))
         self.combo_interval = QComboBox(self)
-        self.combo_interval.addItems(["5 Mins", "15 Mins", "30 Mins", "1 Hour", "3 Hours", "6 Hours", "Daily", "Manual"])
+        self.combo_interval.addItems(["Manual", "30 Mins", "1 Hour", "3 Hours", "6 Hours", "Daily"])
         int_box.addWidget(self.combo_interval)
         int_box.addStretch()
         wp_layout.addLayout(int_box)
 
-        query_box = QHBoxLayout()
-        query_box.addWidget(QLabel("Search Keyword / Tag:", self))
-        self.txt_query = QLineEdit(self)
-        self.txt_query.setPlaceholderText("e.g. nature, cyber, anime, space")
-        query_box.addWidget(self.txt_query)
-        wp_layout.addLayout(query_box)
+        res_box = QHBoxLayout()
+        res_box.addWidget(QLabel("Resolution Filter:", self))
+        self.combo_resolution = QComboBox(self)
+        self.combo_resolution.addItems(list(RESOLUTION_PRESETS.keys()))
+        res_box.addWidget(self.combo_resolution)
+        res_box.addStretch()
+        wp_layout.addLayout(res_box)
 
         cat_group = QGroupBox("Categories", self)
         cat_l = QHBoxLayout(cat_group)
@@ -88,13 +90,6 @@ class SettingsDialog(QDialog):
         sort_box.addWidget(self.combo_sorting)
         sort_box.addStretch()
         wp_layout.addLayout(sort_box)
-
-        res_box = QHBoxLayout()
-        res_box.addWidget(QLabel("Resolution Preference:", self))
-        self.txt_resolution = QLineEdit(self)
-        self.txt_resolution.setPlaceholderText("e.g. 1920x1080, 2560x1440, 3840x2160")
-        res_box.addWidget(self.txt_resolution)
-        wp_layout.addLayout(res_box)
 
         wp_layout.addStretch()
         self.tabs.addTab(wp_tab, "Wallhaven")
@@ -125,7 +120,7 @@ class SettingsDialog(QDialog):
         store_layout.addStretch()
         self.tabs.addTab(store_tab, "Storage")
 
-        # Tab 4: Network
+        # Tab 4: Network Options
         net_tab = QWidget()
         net_layout = QVBoxLayout(net_tab)
 
@@ -143,7 +138,7 @@ class SettingsDialog(QDialog):
         net_layout.addStretch()
         self.tabs.addTab(net_tab, "Network")
 
-        # Bottom Buttons
+        # Bottom Action Buttons
         bottom_btns = QHBoxLayout()
         bottom_btns.addStretch()
 
@@ -163,7 +158,7 @@ class SettingsDialog(QDialog):
         self.chk_start_minimized.setChecked(self.config.get("start_minimized", False))
 
         self.combo_interval.setCurrentText(self.config.get("rotation_interval", "1 Hour"))
-        self.txt_query.setText(self.config.get("search_query", ""))
+        self.combo_resolution.setCurrentText(self.config.get("resolution_preset", "Any"))
 
         cats = self.config.get("categories", {})
         self.chk_cat_general.setChecked(cats.get("general", True))
@@ -176,7 +171,6 @@ class SettingsDialog(QDialog):
         self.chk_pur_nsfw.setChecked(pur.get("nsfw", False))
 
         self.combo_sorting.setCurrentText(self.config.get("sorting", "random"))
-        self.txt_resolution.setText(self.config.get("resolution_preference", ""))
 
         max_mb = self.config.get("max_cache_size_mb", 2048)
         mb_map = {500: "500 MB", 1024: "1 GB", 2048: "2 GB", 5120: "5 GB", 10240: "10 GB", 0: "Unlimited"}
@@ -195,7 +189,7 @@ class SettingsDialog(QDialog):
         if old_interval != new_interval:
             self.wm.scheduler.update_interval()
 
-        self.config.set("search_query", self.txt_query.text().strip())
+        self.config.set("resolution_preset", self.combo_resolution.currentText())
 
         self.config.set("categories", {
             "general": self.chk_cat_general.isChecked(),
@@ -210,7 +204,6 @@ class SettingsDialog(QDialog):
         })
 
         self.config.set("sorting", self.combo_sorting.currentText())
-        self.config.set("resolution_preference", self.txt_resolution.text().strip())
 
         size_str = self.combo_cache_size.currentText()
         str_map = {"500 MB": 500, "1 GB": 1024, "2 GB": 2048, "5 GB": 5120, "10 GB": 10240, "Unlimited": 0}

@@ -6,20 +6,35 @@ import os
 import json
 from utils.win32_utils import set_autostart, is_autostart_enabled
 
+GENRES = [
+    "Cyberpunk", "Anime", "Nature", "Mountains", "Space",
+    "Cars", "Gaming", "Minimal", "Architecture", "City",
+    "Abstract", "Dark", "Random"
+]
+
+RESOLUTION_PRESETS = {
+    "Any": "",
+    "1080p": "1920x1080",
+    "1440p": "2560x1440",
+    "4K": "3840x2160",
+    "Ultrawide": "2560x1080,3440x1440"
+}
+
 DEFAULT_CONFIG = {
     # General Settings
     "start_with_windows": False,
     "start_minimized": False,
     
-    # Wallpaper Settings
-    "rotation_interval": "1 Hour",  # 5 Mins, 15 Mins, 30 Mins, 1 Hour, 3 Hours, 6 Hours, Daily, Manual
-    "search_query": "nature",
-    "categories": {"general": True, "anime": True, "people": False},  # 110
-    "purity": {"sfw": True, "sketchy": False, "nsfw": False},       # 100
+    # Wallpaper & Genre Settings
+    "rotation_interval": "1 Hour",  # Manual, 30 Mins, 1 Hour, 3 Hours, 6 Hours, Daily
+    "selected_genre": "Cyberpunk",
+    "custom_search": "",
+    "categories": {"general": True, "anime": True, "people": False},
+    "purity": {"sfw": True, "sketchy": False, "nsfw": False},
     "sorting": "random",  # random, relevance, date_added, views, favorites, toplist
+    "resolution_preset": "1080p",  # Any, 1080p, 1440p, 4K, Ultrawide
     "resolution_preference": "1920x1080",
     "aspect_ratios": ["16x9"],
-    "tags": [],
     
     # Storage & Cache Settings
     "cache_dir": os.path.join(os.path.expanduser("~"), ".wallhaven_cache"),
@@ -74,6 +89,21 @@ class ConfigManager:
         if key == "start_with_windows":
             set_autostart(value)
         self.save()
+
+    def get_active_query(self) -> str:
+        """Returns the active search query (custom search if provided, else selected genre)."""
+        custom = self.data.get("custom_search", "").strip()
+        if custom:
+            return custom
+        genre = self.data.get("selected_genre", "Random")
+        if genre.lower() == "random":
+            return ""
+        return genre
+
+    def get_resolution_param(self) -> str:
+        """Returns API resolution parameter corresponding to resolution preset."""
+        preset = self.data.get("resolution_preset", "Any")
+        return RESOLUTION_PRESETS.get(preset, "")
 
     def get_categories_string(self) -> str:
         """Returns 3-digit category code string (e.g. '110')."""

@@ -1,6 +1,5 @@
 """
-Main Application Dashboard UI.
-Displays current wallpaper preview, metadata details, action controls, and tabs.
+Main Dashboard UI with Sidebar Navigation, Online Grid Browser, Favorites, and Local Library.
 """
 
 import os
@@ -8,15 +7,17 @@ import subprocess
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QTabWidget, QStatusBar, QFrame
+    QPushButton, QComboBox, QStackedWidget, QStatusBar, QFrame
 )
 from PyQt6.QtGui import QPixmap
+from ui.sidebar import SidebarWidget
+from ui.online_grid_view import OnlineGridView
 from ui.library_view import LibraryView
 from ui.settings_view import SettingsDialog
 
 
 class MainWindow(QMainWindow):
-    """Main Dashboard Window."""
+    """Main Application Window."""
 
     def __init__(self, wallpaper_manager, config_manager, parent=None):
         super().__init__(parent)
@@ -25,8 +26,8 @@ class MainWindow(QMainWindow):
         self.tray_icon_ref = None
 
         self.setWindowTitle("Wallhaven Wallpaper Changer")
-        self.setMinimumSize(820, 520)
-        self.resize(880, 560)
+        self.setMinimumSize(960, 600)
+        self.resize(1040, 640)
 
         self._init_ui()
         self.update_current_display(self.wm.current_wallpaper)
@@ -35,153 +36,147 @@ class MainWindow(QMainWindow):
         self.wm.wallpaper_changed.connect(self.update_current_display)
         self.wm.status_message.connect(self.statusBar().showMessage)
 
+        # Trigger initial search on startup
+        initial_query = self.config.get_active_query()
+        self.online_grid.search_query(initial_query)
+
     def _init_ui(self):
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
 
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
 
-        self.tab_widget = QTabWidget(self)
-        main_layout.addWidget(self.tab_widget)
+        # Left Sidebar Navigation Panel
+        self.sidebar = SidebarWidget(self.config, self)
+        self.sidebar.genre_selected.connect(self._on_genre_selected)
+        self.sidebar.search_submitted.connect(self._on_search_submitted)
+        self.sidebar.nav_changed.connect(self._on_nav_changed)
+        main_layout.addWidget(self.sidebar)
 
-        # Dashboard Tab
-        dash_tab = QWidget()
-        dash_layout = QHBoxLayout(dash_tab)
-        dash_layout.setContentsMargins(14, 14, 14, 14)
-        dash_layout.setSpacing(16)
+        # Divider Line
+        line = QFrame(self)
+        line.setFrameShape(QFrame.Shape.VLine)
+        line.setStyleSheet("color: #334155;")
+        main_layout.addWidget(line)
 
-        # Left Column: Wallpaper Preview Card
-        left_card = QFrame(self)
-        left_card.setObjectName("CardPanel")
-        left_layout = QVBoxLayout(left_card)
-        left_layout.setContentsMargins(10, 10, 10, 10)
+        # Right Main Content Container
+        right_container = QVBoxLayout()
+        right_container.setContentsMargins(6, 6, 6, 6)
+        right_container.setSpacing(10)
 
-        self.preview_label = QLabel(self)
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setStyleSheet("""
+        # Active Wallpaper Header Banner
+        active_card = QFrame(self)
+        active_card.setObjectName("CardPanel")
+        active_layout = QHBoxLayout(active_card)
+        active_layout.setContentsMargins(10, 8, 10, 8)
+        active_layout.setSpacing(12)
+
+        self.active_thumb_lbl = QLabel(self)
+        self.active_thumb_lbl.setFixedSize(90, 54)
+        self.active_thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.active_thumb_lbl.setStyleSheet("""
             background-color: #020617;
-            border: 1px solid #1e293b;
-            border-radius: 6px;
+            border: 1px solid #334155;
+            border-radius: 4px;
         """)
-        self.preview_label.setMinimumSize(460, 300)
-        left_layout.addWidget(self.preview_label, 1)
+        active_layout.addWidget(self.active_thumb_lbl)
 
-        dash_layout.addWidget(left_card, 3)
+        info_box = QVBoxLayout()
+        info_box.setSpacing(2)
 
-        # Right Column: Details & Action Panel
-        right_card = QFrame(self)
-        right_card.setObjectName("CardPanel")
-        right_layout = QVBoxLayout(right_card)
-        right_layout.setContentsMargins(16, 16, 16, 16)
-        right_layout.setSpacing(14)
+        self.lbl_title = QLabel("Current: None Loaded", self)
+        self.lbl_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #38bdf8;")
+        info_box.addWidget(self.lbl_title)
 
-        # Header Title
-        self.lbl_title = QLabel("Wallpaper: Loading...", self)
-        self.lbl_title.setStyleSheet("font-size: 17px; font-weight: bold; color: #38bdf8;")
-        right_layout.addWidget(self.lbl_title)
+        self.lbl_details = QLabel("Resolution: --- | Category: ---", self)
+        self.lbl_details.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        info_box.addWidget(self.lbl_details)
 
-        # Details Grid
-        details_layout = QVBoxLayout()
-        details_layout.setSpacing(6)
+        active_layout.addLayout(info_box, 1)
 
-        self.lbl_resolution = QLabel("Resolution: ---", self)
-        self.lbl_resolution.setStyleSheet("color: #cbd5e1; font-size: 13px;")
-        details_layout.addWidget(self.lbl_resolution)
-
-        self.lbl_source = QLabel("Source: Wallhaven", self)
-        self.lbl_source.setStyleSheet("color: #94a3b8; font-size: 12px;")
-        self.lbl_source.setWordWrap(True)
-        details_layout.addWidget(self.lbl_source)
-
-        right_layout.addLayout(details_layout)
-
-        # Primary Actions (Change Now, Next, Favorite)
-        actions_box = QVBoxLayout()
-        actions_box.setSpacing(8)
-
-        self.btn_change = QPushButton("Fetch New Wallpaper", self)
-        self.btn_change.setObjectName("PrimaryButton")
-        self.btn_change.clicked.connect(self.wm.fetch_next_wallpaper)
-        actions_box.addWidget(self.btn_change)
-
-        sub_btns = QHBoxLayout()
-        self.btn_next = QPushButton("Next in History", self)
-        self.btn_next.clicked.connect(self.wm.fetch_next_in_history)
-        sub_btns.addWidget(self.btn_next)
-
-        self.btn_favorite = QPushButton("Favorite", self)
+        # Quick Control Buttons
+        self.btn_favorite = QPushButton("★ Favorite", self)
         self.btn_favorite.clicked.connect(self._toggle_favorite)
-        sub_btns.addWidget(self.btn_favorite)
-        actions_box.addLayout(sub_btns)
+        active_layout.addWidget(self.btn_favorite)
 
-        right_layout.addLayout(actions_box)
+        self.btn_next = QPushButton("Next Wallpaper", self)
+        self.btn_next.setObjectName("PrimaryButton")
+        self.btn_next.clicked.connect(self.wm.fetch_next_wallpaper)
+        active_layout.addWidget(self.btn_next)
 
-        # Auto Rotation Control
-        interval_layout = QHBoxLayout()
-        interval_layout.addWidget(QLabel("Auto Rotation:", self))
-        self.combo_interval = QComboBox(self)
-        self.combo_interval.addItems(["5 Mins", "15 Mins", "30 Mins", "1 Hour", "3 Hours", "6 Hours", "Daily", "Manual"])
-        self.combo_interval.setCurrentText(self.config.get("rotation_interval", "1 Hour"))
-        self.combo_interval.currentTextChanged.connect(self._on_interval_changed)
-        interval_layout.addWidget(self.combo_interval)
-        right_layout.addLayout(interval_layout)
+        right_container.addWidget(active_card)
 
-        # Bottom Utilities
-        right_layout.addStretch()
+        # Stacked Pages Widget
+        self.stack = QStackedWidget(self)
 
-        utils_layout = QHBoxLayout()
-        self.btn_open_file = QPushButton("Open File Folder", self)
-        self.btn_open_file.clicked.connect(self._open_wallpaper_folder)
-        utils_layout.addWidget(self.btn_open_file)
+        # Page 0: Online Grid View
+        self.online_grid = OnlineGridView(self.wm, self.config, self)
+        self.stack.addWidget(self.online_grid)
 
-        self.btn_open_settings = QPushButton("Settings", self)
-        self.btn_open_settings.clicked.connect(self.open_settings)
-        utils_layout.addWidget(self.btn_open_settings)
+        # Page 1: Favorites View
+        self.fav_library = LibraryView(self.wm, self)
+        self.fav_library.filter_combo.setCurrentText("Favorites")
+        self.stack.addWidget(self.fav_library)
 
-        right_layout.addLayout(utils_layout)
+        # Page 2: Local Library View
+        self.local_library = LibraryView(self.wm, self)
+        self.stack.addWidget(self.local_library)
 
-        dash_layout.addWidget(right_card, 2)
+        right_container.addWidget(self.stack, 1)
 
-        self.tab_widget.addTab(dash_tab, "Dashboard")
-
-        # Library Tab
-        self.library_view = LibraryView(self.wm, self)
-        self.tab_widget.addTab(self.library_view, "Wallpaper Library")
-
-        self.tab_widget.currentChanged.connect(self._on_tab_changed)
+        main_layout.addLayout(right_container, 1)
 
         # Status Bar
         self.setStatusBar(QStatusBar(self))
         self.statusBar().showMessage("Ready")
 
+    def _on_genre_selected(self, genre: str):
+        self.stack.setCurrentIndex(0)
+        self.online_grid.search_query(genre)
+
+    def _on_search_submitted(self, query: str):
+        self.stack.setCurrentIndex(0)
+        self.online_grid.search_query(query)
+
+    def _on_nav_changed(self, page_index: int):
+        if page_index == 3:  # Settings
+            self.open_settings()
+        else:
+            self.stack.setCurrentIndex(page_index)
+            if page_index == 1:
+                self.fav_library.filter_combo.setCurrentText("Favorites")
+                self.fav_library.reload_library()
+            elif page_index == 2:
+                self.local_library.filter_combo.setCurrentText("All")
+                self.local_library.reload_library()
+
     def update_current_display(self, meta: dict | None):
         if not meta:
-            self.lbl_title.setText("Wallpaper: None Selected")
-            self.lbl_resolution.setText("Resolution: ---")
-            self.lbl_source.setText("Source: Wallhaven")
-            self.preview_label.setText("No wallpaper loaded")
+            self.lbl_title.setText("Current: None Loaded")
+            self.lbl_details.setText("Resolution: ---")
+            self.active_thumb_lbl.setText("No Image")
             return
 
         wp_id = meta.get("id", "Unknown")
         res = meta.get("resolution", "Unknown")
         is_fav = meta.get("favorite", False)
-        source = meta.get("source_url", "Wallhaven")
+        genre = self.config.get("selected_genre", "Cyberpunk")
 
         fav_symbol = "★ " if is_fav else ""
-        self.lbl_title.setText(f"{fav_symbol}Wallpaper #{wp_id}")
-        self.lbl_resolution.setText(f"Resolution: {res}")
-        self.lbl_source.setText(f"Source: {source}")
+        self.lbl_title.setText(f"{fav_symbol}Current: Wallpaper #{wp_id}")
+        self.lbl_details.setText(f"Resolution: {res} | Category: {genre}")
 
         if is_fav:
             self.btn_favorite.setText("★ Favorited")
             self.btn_favorite.setObjectName("FavoriteButton")
         else:
-            self.btn_favorite.setText("Favorite")
+            self.btn_favorite.setText("★ Favorite")
             self.btn_favorite.setObjectName("")
         self.btn_favorite.setStyle(self.btn_favorite.style())
 
-        # Update Preview Image
+        # Update Thumbnail
         thumb_path = meta.get("thumb_path")
         filepath = meta.get("filepath")
         target_img = thumb_path if (thumb_path and os.path.exists(thumb_path)) else filepath
@@ -190,15 +185,11 @@ class MainWindow(QMainWindow):
             pixmap = QPixmap(target_img)
             if not pixmap.isNull():
                 scaled = pixmap.scaled(
-                    self.preview_label.size(),
+                    self.active_thumb_lbl.size(),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 )
-                self.preview_label.setPixmap(scaled)
-            else:
-                self.preview_label.setText("Preview unavailable")
-        else:
-            self.preview_label.setText("Preview unavailable")
+                self.active_thumb_lbl.setPixmap(scaled)
 
     def _toggle_favorite(self):
         fav = self.wm.toggle_current_favorite()
@@ -206,34 +197,16 @@ class MainWindow(QMainWindow):
             self.btn_favorite.setText("★ Favorited")
             self.btn_favorite.setObjectName("FavoriteButton")
         else:
-            self.btn_favorite.setText("Favorite")
+            self.btn_favorite.setText("★ Favorite")
             self.btn_favorite.setObjectName("")
         self.btn_favorite.setStyle(self.btn_favorite.style())
-
-    def _open_wallpaper_folder(self):
-        if self.wm.current_wallpaper:
-            fpath = self.wm.current_wallpaper.get("filepath")
-            if fpath and os.path.exists(fpath):
-                subprocess.Popen(f'explorer /select,"{os.path.abspath(fpath)}"')
-
-    def _on_interval_changed(self, interval_str: str):
-        self.config.set("rotation_interval", interval_str)
-        self.wm.scheduler.update_interval()
-
-    def _on_tab_changed(self, index: int):
-        if index == 1:
-            self.library_view.reload_library()
 
     def open_settings(self):
         dialog = SettingsDialog(self.config, self.wm, self)
         if dialog.exec():
-            self.combo_interval.setCurrentText(self.config.get("rotation_interval", "1 Hour"))
-            self.library_view.reload_library()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.wm.current_wallpaper:
-            self.update_current_display(self.wm.current_wallpaper)
+            self.local_library.reload_library()
+            self.fav_library.reload_library()
+            self.online_grid.refresh_search()
 
     def closeEvent(self, event):
         """Intersects window close button: hides window to system tray instead of exiting app."""

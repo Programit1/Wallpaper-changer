@@ -1,6 +1,6 @@
 """
 PyInstaller Packaging Build Script.
-Compiles main.py into dist/GitHubWallpaperChanger.exe
+Compiles main.py into dist/GitHubWallpaperChanger/GitHubWallpaperChanger.exe
 """
 
 import os
@@ -17,8 +17,8 @@ def build():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm",
-        "--onedir",  # create a single directory bundle (or --onefile for single EXE)
-        "--windowed", # no console window
+        "--onedir",     # create a standalone directory bundle
+        "--windowed",   # no console window
         "--name", "GitHubWallpaperChanger",
         "--paths", project_dir,
         "--hidden-import", "PyQt6.QtCore",
@@ -29,15 +29,15 @@ def build():
         main_script
     ]
 
-    print("Running command:", " ".join(cmd))
+    print("Running PyInstaller command...")
     res = subprocess.run(cmd, cwd=project_dir)
 
     if res.returncode == 0:
         exe_path = os.path.join(project_dir, "dist", "GitHubWallpaperChanger", "GitHubWallpaperChanger.exe")
-        print("\n✔ PyInstaller Build Completed Successfully!")
+        print("\n[OK] PyInstaller Build Completed Successfully!")
         print(f"Executable Location: {exe_path}")
     else:
-        print(f"\n✖ Build Failed with return code {res.returncode}")
+        print(f"\n[FAIL] Build Failed with return code {res.returncode}")
 
 
 if __name__ == "__main__":

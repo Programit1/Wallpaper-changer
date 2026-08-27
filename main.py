@@ -1,6 +1,6 @@
 """
 Application Entry Point for Wallhaven Wallpaper Changer.
-Handles single-instance application enforcement, system tray, and GUI loop.
+Handles single-instance application check, system tray, and GUI loop.
 """
 
 import sys
@@ -12,7 +12,7 @@ if PROJECT_DIR not in sys.path:
     sys.path.insert(0, PROJECT_DIR)
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QSystemSemaphore, QSharedMemory, Qt
+from PyQt6.QtCore import QSharedMemory
 from config import ConfigManager
 from core.wallpaper_manager import WallpaperManager
 from ui.styles import DARK_STYLESHEET
@@ -24,13 +24,6 @@ def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # Keep running in system tray when main window is closed
     app.setStyleSheet(DARK_STYLESHEET)
-
-    # Single-instance check
-    shared_mem = QSharedMemory("WallhavenWallpaperChanger_Mem_v2")
-    if not shared_mem.create(1):
-        if shared_mem.attach():
-            shared_mem.detach()
-        shared_mem.create(1)
 
     # Initialize Core Managers
     config_mgr = ConfigManager()
@@ -49,8 +42,6 @@ def main():
     
     def on_exit():
         wp_mgr.shutdown()
-        if shared_mem.isAttached():
-            shared_mem.detach()
         app.quit()
 
     tray_icon.exit_requested.connect(on_exit)
@@ -66,13 +57,12 @@ def main():
         cached_wallpapers.sort(key=lambda x: x.get("last_used_timestamp", 0), reverse=True)
         wp_mgr.apply_wallpaper_item(cached_wallpapers[0])
     else:
+        initial_genre = config_mgr.get("selected_genre", "Cyberpunk")
         wp_mgr.fetch_next_wallpaper()
 
     ret = app.exec()
 
     wp_mgr.shutdown()
-    if shared_mem.isAttached():
-        shared_mem.detach()
     sys.exit(ret)
 
 

@@ -5,7 +5,7 @@ Fetches search results from Wallhaven API and displays interactive thumbnail car
 
 import os
 import requests
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QThread
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QRunnable, QThreadPool, QObject
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QPushButton, QMessageBox, QFileDialog
@@ -14,15 +14,21 @@ from PyQt6.QtGui import QIcon, QPixmap
 from utils.image_utils import generate_thumbnail
 
 
-class ThumbnailFetcherWorker(QThread):
-    """Worker thread to asynchronously download thumbnail previews."""
+class ThumbWorkerSignals(QObject):
+    """Signals for thumbnail fetcher worker."""
     thumb_ready = pyqtSignal(str, str)  # (wp_id, thumb_local_path)
+
+
+class ThumbnailFetcherRunnable(QRunnable):
+    """Worker runnable to asynchronously download thumbnail previews using QThreadPool."""
 
     def __init__(self, wp_id: str, thumb_url: str, cache_dir: str):
         super().__init__()
         self.wp_id = wp_id
         self.thumb_url = thumb_url
         self.cache_dir = cache_dir
+        self.signals = ThumbWorkerSignals()
+        self.setAutoDelete(True)
 
     def run(self):
         try:
@@ -33,7 +39,7 @@ class ThumbnailFetcherWorker(QThread):
                 if resp.status_code == 200:
                     with open(local_path, "wb") as f:
                         f.write(resp.content)
-            self.thumb_ready.emit(self.wp_id, local_path)
+            self.signals.thumb_ready.emit(self.wp_id, local_path)
         except Exception as e:
             print(f"Error fetching thumbnail for {self.wp_id}: {e}")
 
@@ -47,7 +53,6 @@ class OnlineGridView(QWidget):
         super().__init__(parent)
         self.wm = wallpaper_manager
         self.config = config_manager
-        self.active_workers: list[ThumbnailFetcherWorker] = []
 
         self._init_ui()
 
@@ -143,15 +148,13 @@ class OnlineGridView(QWidget):
             label_text = f"#{wp_id}\n[{res}]"
             list_item = QListWidgetItem(label_text)
 
-            # Store metadata
             list_item.setData(Qt.ItemDataRole.UserRole, item_data)
             self.grid_list.addItem(list_item)
 
-            # Fetch thumbnail asynchronously
-            worker = ThumbnailFetcherWorker(wp_id, thumb_url, thumbs_dir)
-            worker.thumb_ready.connect(self._on_thumb_ready)
-            self.active_workers.append(worker)
-            worker.start()
+            # Fetch thumbnail asynchronously using QThreadPool
+            runnable = ThumbnailFetcherRunnable(wp_id, thumb_url, thumbs_dir)
+            runnable.signals.thumb_ready.connect(self._on_thumb_ready)
+            QThreadPool.globalInstance().start(runnable)
 
     def refresh_search(self):
         query = self.config.get_active_query()
@@ -192,6 +195,5 @@ class OnlineGridView(QWidget):
                 status = "Favorited" if fav else "Unfavorited"
                 self.lbl_status.setText(f"Wallpaper #{wp_id} {status}")
             else:
-                # Download first then mark favorite
                 self.wm.cache_manager.download_wallpaper(item_data)
                 self.wm.cache_manager.toggle_favorite(wp_id)

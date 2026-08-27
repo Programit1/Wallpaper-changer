@@ -8,20 +8,26 @@ import json
 import time
 import shutil
 import requests
-from PyQt6.QtCore import QObject, pyqtSignal, QThread
+from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QThreadPool
 from utils.image_utils import generate_thumbnail, get_image_info, get_file_hash
 
 
-class DownloadWorker(QThread):
-    """Background thread worker for non-blocking asynchronous downloads."""
+class DownloadWorkerSignals(QObject):
+    """Signals for background download worker."""
     download_finished = pyqtSignal(str, str, dict)  # (url, local_path, meta)
     download_failed = pyqtSignal(str, str)  # (url, error_message)
+
+
+class DownloadRunnable(QRunnable):
+    """Background runnable worker for non-blocking asynchronous downloads using QThreadPool."""
 
     def __init__(self, url: str, target_path: str, meta: dict):
         super().__init__()
         self.url = url
         self.target_path = target_path
         self.meta = meta
+        self.signals = DownloadWorkerSignals()
+        self.setAutoDelete(True)
 
     def run(self):
         try:
@@ -39,7 +45,7 @@ class DownloadWorker(QThread):
                 os.remove(self.target_path)
             os.rename(temp_path, self.target_path)
 
-            self.download_finished.emit(self.url, self.target_path, self.meta)
+            self.signals.download_finished.emit(self.url, self.target_path, self.meta)
 
         except Exception as e:
             if os.path.exists(self.target_path + ".tmp"):
@@ -47,7 +53,7 @@ class DownloadWorker(QThread):
                     os.remove(self.target_path + ".tmp")
                 except Exception:
                     pass
-            self.download_failed.emit(self.url, str(e))
+            self.signals.download_failed.emit(self.url, str(e))
 
 
 class CacheManager(QObject):
@@ -66,7 +72,6 @@ class CacheManager(QObject):
 
         self.index_path = os.path.join(self.cache_dir, "cache_index.json")
         self.index: dict[str, dict] = {}
-        self.active_workers: list[DownloadWorker] = []
         self.load_index()
 
     def load_index(self):
@@ -146,7 +151,7 @@ class CacheManager(QObject):
 
     def download_wallpaper(self, item_data: dict):
         """
-        Asynchronously downloads a wallpaper from Wallhaven API data object.
+        Asynchronously downloads a wallpaper from Wallhaven API data object using QThreadPool.
         """
         wp_id = str(item_data.get("id"))
         if self.is_cached(wp_id):
@@ -179,11 +184,10 @@ class CacheManager(QObject):
             "tags": [t.get("name") for t in item_data.get("tags", [])] if isinstance(item_data.get("tags"), list) else []
         }
 
-        worker = DownloadWorker(file_url, target_path, meta)
-        worker.download_finished.connect(self._on_download_finished)
-        worker.download_failed.connect(self._on_download_failed)
-        self.active_workers.append(worker)
-        worker.start()
+        runnable = DownloadRunnable(file_url, target_path, meta)
+        runnable.signals.download_finished.connect(self._on_download_finished)
+        runnable.signals.download_failed.connect(self._on_download_failed)
+        QThreadPool.globalInstance().start(runnable)
 
     def _on_download_finished(self, url: str, local_path: str, meta: dict):
         wp_id = meta["id"]
@@ -194,11 +198,9 @@ class CacheManager(QObject):
         self.save_index()
         self.enforce_cache_limit()
 
-        self.active_workers = [w for w in self.active_workers if w.url != url]
         self.download_completed.emit(meta)
 
     def _on_download_failed(self, url: str, error_msg: str):
-        self.active_workers = [w for w in self.active_workers if w.url != url]
         self.download_error.emit(f"Download failed: {error_msg}")
 
     def get_total_cache_size_bytes(self) -> int:

@@ -4,7 +4,7 @@ Multi-column responsive Pinterest-style layout displaying WallpaperCards with dy
 """
 
 import os
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThreadPool
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton,
     QFrame
@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QPixmap
 from ui.wallpaper_card import WallpaperCard
 from ui.preview_dialog import PreviewDialog
+from ui.online_grid_view import ThumbnailFetcherRunnable
 
 
 class MasonryGallery(QWidget):
@@ -94,7 +95,6 @@ class MasonryGallery(QWidget):
 
     def _rebuild_grid(self):
         """Rebuilds the masonry multi-column structure."""
-        # Clear existing column layouts
         while self.cols_layout.count() > 0:
             child = self.cols_layout.takeAt(0)
             if child.widget():
@@ -121,23 +121,19 @@ class MasonryGallery(QWidget):
             column_widgets.append(col_w)
             column_layouts.append(col_l)
 
-        # Distribute cards round-robin across columns
         card_width = max(int((self.width() - (num_cols * 16) - 40) / num_cols), 180)
 
         for i, item_data in enumerate(self.items_data):
             col_idx = i % num_cols
             card = WallpaperCard(item_data, self.wm, column_widgets[col_idx])
             
-            # Connect card action signals
             card.card_clicked.connect(self._on_card_clicked)
             card.set_wallpaper_clicked.connect(self._on_card_set_wallpaper)
             card.favorite_clicked.connect(self._on_card_favorite)
             card.download_clicked.connect(self._on_card_download)
 
-            # Load thumbnail pixmap
             self._load_card_pixmap(card, item_data, card_width)
 
-            # Insert before stretch
             target_layout = column_layouts[col_idx]
             target_layout.insertWidget(target_layout.count() - 1, card)
 
@@ -160,20 +156,22 @@ class MasonryGallery(QWidget):
             else:
                 card.set_pixmap(QPixmap(card_width, int(card_width * 0.75)), target_width=card_width)
         else:
-            # Download thumbnail asynchronously if URL is present
             thumbs = item_data.get("thumbs", {})
             thumb_url = thumbs.get("small") or thumbs.get("original") or item_data.get("path", "")
             if thumb_url:
-                from ui.online_grid_view import ThumbnailFetcherWorker
                 cache_dir = self.config.get("cache_dir")
                 thumbs_dir = os.path.join(cache_dir, "thumbnails")
-                worker = ThumbnailFetcherWorker(wp_id, thumb_url, thumbs_dir)
-                def on_ready(fetched_id, local_path):
-                    if fetched_id == wp_id and os.path.exists(local_path):
-                        px = QPixmap(local_path)
-                        card.set_pixmap(px, target_width=card_width)
-                worker.thumb_ready.connect(on_ready)
-                worker.start()
+                runnable = ThumbnailFetcherRunnable(wp_id, thumb_url, thumbs_dir)
+                
+                def make_on_ready(c, w_id, w_w):
+                    def on_ready(fetched_id, local_path):
+                        if fetched_id == w_id and os.path.exists(local_path):
+                            px = QPixmap(local_path)
+                            c.set_pixmap(px, target_width=w_w)
+                    return on_ready
+
+                runnable.signals.thumb_ready.connect(make_on_ready(card, wp_id, card_width))
+                QThreadPool.globalInstance().start(runnable)
 
     def _on_card_clicked(self, item_data: dict):
         preview = PreviewDialog(item_data, self.wm, self)
